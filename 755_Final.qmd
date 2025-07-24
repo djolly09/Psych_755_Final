@@ -1,0 +1,120 @@
+---
+title: "Pysch 755 Final"
+format: 
+  html:
+    toc: true 
+    toc_depth: 4
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+options(conflicts.policy = "depends.ok")
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_ml.R?raw=true")
+tidymodels_conflictRules()
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_plots.R?raw=true")
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
+library(tidyverse) 
+library(tidymodels)
+library(xfun, include.only = "cache_rds")
+library(keras, exclude = "get_weights")
+library(magrittr, exclude = c("set_names", "extract"))
+path_data <- "data"
+theme_set(theme_classic())
+options(tibble.width = Inf, dplyr.print_max=Inf)
+rerun_setting <- FALSE
+
+cl <- parallel::makePSOCKcluster(parallel::detectCores(logical = FALSE))
+doParallel::registerDoParallel(cl)
+```
+
+```{r}
+data_all <- read_csv(here::here(path_data, 'insurance_claims.csv'), show_col_types = FALSE) |> 
+  janitor::clean_names() |> glimpse()
+```
+
+```{r}
+skimr::skim(data_all)
+```
+
+```{r}
+data_all  <- data_all |>
+  mutate(across(where(is.character), ~replace(., . == "?", NA)))
+
+glimpse(data_all)
+```
+
+
+```{r}
+data_all <- data_all |> 
+  select(-'c39')
+```
+
+```{r}
+set.seed(123456)
+splits_test <- data_all |> 
+  initial_split(prop = 2/3, strata = "fraud_reported")
+
+data_trn <- splits_test |> 
+  analysis()
+
+data_test <- splits_test |> 
+  assessment()
+
+split_val <- validation_split(data_trn, prop = c(3/4), strata = "fraud_reported")
+```
+
+```{r}
+data_trn |>
+  select(where(is.numeric)) |> 
+  names() |> 
+  map(\(name) plot_box_violin(df = data_trn, x = name)) |> 
+  cowplot::plot_grid(plotlist = _, ncol = 3)
+```
+
+```{r}
+rec_1 <- recipe(fraud_reported ~ auto_year + police_report_available + auto_model + auto_make, data = data_trn) |> 
+  step_impute_mean(all_numeric_predictors()) |> 
+  step_impute_mode(all_nominal_predictors()) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_interact(terms = ~ auto_year:police_report_available) |> 
+  step_normalize(all_predictors())
+
+feat_range_trn <- rec_1 |> 
+  prep(data_trn) |> 
+  bake(NULL)
+```
+
+
+```{r}
+fit_seeds <- sample.int(10^5, size = 3)
+
+fit_nnet_range <- cache_rds(
+  expr = {
+    mlp(epochs = 10) |> 
+      set_mode("classification") |> 
+      set_engine("keras", 
+                 verbose = 1, 
+                 seeds = fit_seeds, 
+                 metrics = c("accuracy"),
+                 validation_split = 0.1) |> 
+      fit_resamples(
+        preprocessor = rec_1,         
+        resamples = split_val,        
+        metrics = metric_set(accuracy)
+      )
+  }, 
+  dir = "cache/",
+  file = "fit_nnet_range",
+  rerun = rerun_setting
+)
+
+fit_nnet_range$.metrics
+```
+
+
+
