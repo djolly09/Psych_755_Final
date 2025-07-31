@@ -15,15 +15,18 @@ Our final project uses:
 ## Files in this Repo
 
 1. This README file!
+
 2. Data folder with
-  - 'insurance_claims.csv' : contains the primary dataset of our analysis
-  - 'average_insurance_2015.csv' : contains extra insurance data added to the SQL database
+    - 'insurance_claims.csv' : contains the primary dataset of our analysis
+    - 'average_insurance_2015.csv' : contains extra insurance data added to the SQL database
+    
 3. 'build-insurance.py' : Python script for building SQL database
+
 4. '755_final.qmd' : R/quarto notebook with our data analysis & neural network model fitting
 
 ## Using this Repo
 
-### Getting Started {#sec-start}
+### Getting Started
 
 In order to interact with the files in this repository, complete the following steps.
 
@@ -41,7 +44,7 @@ cd Documents/github/Psych_755_Final
 
 ### Building a SQL Database
 
-After completing the steps above in @sec-start, you are ready to build a SQL database! 
+After completing the steps above, you are ready to build a SQL database! 
 
 1. Run this command to build the SQL database:
 
