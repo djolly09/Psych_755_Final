@@ -1,5 +1,6 @@
 ---
-title: "Pysch 755 Final"
+title: "PSYCH 755 Final"
+author: David Jolly, Lauren Khoury, Jake Murray
 format: 
   html:
     toc: true 
