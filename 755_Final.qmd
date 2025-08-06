@@ -1,6 +1,5 @@
 ---
-title: "PSYCH 755 Final"
-author: David Jolly, Lauren Khoury, Jake Murray
+title: "Pysch 755 Final"
 format: 
   html:
     toc: true 
@@ -24,10 +23,12 @@ library(tidymodels)
 library(xfun, include.only = "cache_rds")
 library(keras, exclude = "get_weights")
 library(magrittr, exclude = c("set_names", "extract"))
+library(themis)
+library(datadictionary)
 path_data <- "data"
 theme_set(theme_classic())
 options(tibble.width = Inf, dplyr.print_max=Inf)
-rerun_setting <- FALSE
+rerun_setting <- TRUE
 
 cl <- parallel::makePSOCKcluster(parallel::detectCores(logical = FALSE))
 doParallel::registerDoParallel(cl)
@@ -44,7 +45,10 @@ skimr::skim(data_all)
 
 ```{r}
 data_all  <- data_all |>
-  mutate(across(where(is.character), ~replace(., . == "?", NA)))
+  mutate(across(where(is.character), ~replace(., . == "?", NA)),
+         property_damage_yes = if_else(property_damage == 'NO', -.5, .5),
+         police_report_available_yes = if_else(police_report_available == 'NO', -.5, .5)) |> 
+  select(-property_damage, -police_report_available)
 
 glimpse(data_all)
 ```
@@ -54,6 +58,96 @@ glimpse(data_all)
 data_all <- data_all |> 
   select(-'c39')
 ```
+
+
+## Creat a Data Dictionary
+### Find all variable names
+```{r}
+variable_names <- colnames(data_all)
+variable_names
+```
+
+### Define the variables
+```{r}
+variable_names <- c(
+  "months_as_customer", "age", "policy_number", "policy_bind_date",
+  "policy_state", "policy_csl", "policy_deductable", "policy_annual_premium",
+  "umbrella_limit", "insured_zip", "insured_sex", "insured_education_level",
+  "insured_occupation", "insured_hobbies", "insured_relationship", "capital_gains",
+  "capital_loss", "incident_date", "incident_type", "collision_type",
+  "incident_severity", "authorities_contacted", "incident_state", "incident_city",
+  "incident_location", "incident_hour_of_the_day", "number_of_vehicles_involved", "property_damage",
+  "bodily_injuries", "witnesses", "police_report_available", "total_claim_amount",
+  "injury_claim", "property_claim", "vehicle_claim", "auto_make",
+  "auto_model", "auto_year", "fraud_reported"
+)
+```
+
+### Add descriptions
+```{r}
+variable_descriptions <- c(
+  "Length of time (in months) the customer has been with the insurer",
+  "Age of the primary insured person",
+  "Unique identifier for the insurance policy",
+  "Date the policy was bound (i.e., became active)",
+  "State in which the policy was issued",
+  "Combined single limit for liability coverage (e.g., '250/500')",
+  "Deductible amount on the policy",
+  "Annual premium charged for the policy",
+  "Additional umbrella liability coverage limit",
+  "ZIP code of the insured",
+  "Sex of the insured (e.g., MALE, FEMALE)",
+  "Highest education level attained by the insured",
+  "Occupation of the insured individual",
+  "Insured’s hobbies (e.g., reading, skiing)",
+  "Relationship of the insured to the policyholder",
+  "Declared capital gains on the account",
+  "Declared capital loss on the account",
+  "Date on which the incident occurred",
+  "Type of incident (e.g., Collision, Theft, Hail)",
+  "Type of collision (e.g., Rear-End, Side, Front)",
+  "Severity level of the incident (e.g., Major, Minor)",
+  "Which authority was contacted after the incident",
+  "State where the incident occurred",
+  "City where the incident occurred",
+  "Location description of the incident",
+  "Hour of day the incident occurred (0–23)",
+  "Number of vehicles involved in the incident",
+  "Whether there was property damage (YES/NO)",
+  "Number of bodily injuries reported",
+  "Number of witnesses to the incident",
+  "Whether a police report was available (YES/NO)",
+  "Total dollar amount claimed for the incident",
+  "Dollar amount claimed for bodily injury",
+  "Dollar amount claimed for property damage",
+  "Dollar amount claimed for vehicle damage",
+  "Make of the insured automobile (e.g., Toyota)",
+  "Model of the insured automobile (e.g., Corolla)",
+  "Year the insured automobile was manufactured",
+  "Whether the claim was reported as fraud (Y/N)"
+)
+```
+
+### Create into a table
+```{r}
+data_dictionary <- data.frame(
+  `Variable_Name` = variable_names,
+  `Variable_Description` = variable_descriptions,
+  stringsAsFactors = FALSE
+)
+
+data_dictionary
+```
+
+## Observe Correlations
+```{r}
+sub_data <- data_all |> 
+  select(auto_year, auto_make, 
+                    property_damage_yes, bodily_injuries, injury_claim, witnesses, fraud_reported)
+
+GGally::ggpairs(sub_data)
+```
+
 
 ```{r}
 set.seed(123456)
@@ -78,16 +172,25 @@ data_trn |>
 ```
 
 ```{r}
-rec_1 <- recipe(fraud_reported ~ auto_year + police_report_available + auto_model + auto_make, data = data_trn) |> 
-  step_impute_mean(all_numeric_predictors()) |> 
-  step_impute_mode(all_nominal_predictors()) |> 
-  step_dummy(all_nominal_predictors()) |> 
-  step_interact(terms = ~ auto_year:police_report_available) |> 
-  step_normalize(all_predictors())
+rec_1 <- recipe(fraud_reported ~ ., data = data_trn) |>
+  step_rm(incident_location, insured_zip, policy_bind_date, incident_date,
+          policy_number, insured_hobbies) |>
+  step_impute_mean(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors()) |>
+  step_log(policy_annual_premium, total_claim_amount, injury_claim,
+           property_claim, vehicle_claim, capital_gains, offset = 1) |> 
+  step_other(all_nominal_predictors(), threshold = 0.05, other = "other") |>
+  step_dummy(all_nominal_predictors()) |>
+  step_interact(terms = ~ injury_claim:property_damage_yes) |>
+  step_interact(terms = ~ police_report_available_yes:injury_claim) |> 
+  step_smote(fraud_reported) |>
+  step_zv(all_predictors()) |>
+  step_normalize(all_numeric_predictors())
 
 feat_range_trn <- rec_1 |> 
   prep(data_trn) |> 
   bake(NULL)
+
 ```
 
 
@@ -96,17 +199,20 @@ fit_seeds <- sample.int(10^5, size = 3)
 
 fit_nnet_range <- cache_rds(
   expr = {
-    mlp(epochs = 10) |> 
+    mlp(
+    hidden_units = 24,
+    penalty = 0.003,
+    epochs = 100
+)  |> 
       set_mode("classification") |> 
-      set_engine("keras", 
-                 verbose = 1, 
+      set_engine("keras", callbacks = callback_early_stopping(patience = 10),
                  seeds = fit_seeds, 
-                 metrics = c("accuracy"),
+                 metrics = c("accuracy", "AUC"),
                  validation_split = 0.1) |> 
       fit_resamples(
         preprocessor = rec_1,         
         resamples = split_val,        
-        metrics = metric_set(accuracy)
+        metrics = metric_set(accuracy, roc_auc)
       )
   }, 
   dir = "cache/",
@@ -116,6 +222,58 @@ fit_nnet_range <- cache_rds(
 
 fit_nnet_range$.metrics
 ```
+
+
+```{r}
+
+rec_2 <- recipe(fraud_reported ~ ., data = data_trn) |>
+  step_rm(incident_location, insured_zip, policy_bind_date, incident_date,
+          policy_number, insured_hobbies) |>
+  step_impute_mean(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors()) |>
+  step_log(policy_annual_premium, total_claim_amount, injury_claim,
+           property_claim, vehicle_claim, capital_gains, offset = 1) |> 
+  step_other(all_nominal_predictors(), threshold = 0.05, other = "other") |>
+  step_dummy(all_nominal_predictors()) |>
+  step_interact(terms = ~ all_numeric_predictors():all_numeric_predictors()) |>
+  step_smote(fraud_reported) |>
+  step_zv(all_predictors()) |>
+  step_normalize(all_numeric_predictors())
+
+feat_range_trn <- rec_2 |> 
+  prep(data_trn) |> 
+  bake(NULL)
+```
+
+```{r}
+fit_seeds <- sample.int(10^5, size = 3)
+
+fit_nnet_range <- cache_rds(
+  expr = {
+    mlp(
+    hidden_units = 19,
+    penalty = 0.0054,
+    epochs = 61
+)  |> 
+      set_mode("classification") |> 
+      set_engine("keras", callbacks = callback_early_stopping(patience = 10),
+                 seeds = fit_seeds, 
+                 metrics = c("accuracy", "AUC"),
+                 validation_split = 0.1) |> 
+      fit_resamples(
+        preprocessor = rec_2,         
+        resamples = split_val,        
+        metrics = metric_set(accuracy, roc_auc)
+      )
+  }, 
+  dir = "cache/",
+  file = "fit_nnet_range",
+  rerun = rerun_setting
+)
+
+fit_nnet_range$.metrics
+```
+
 
 
 
