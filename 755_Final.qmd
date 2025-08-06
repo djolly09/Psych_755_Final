@@ -11,7 +11,11 @@ editor:
   markdown: 
     wrap: 72
 ---
+# Project Overview
+This project focuses on the importance of fraud detection with automotive insurance. 
 
+# Set up 
+## Set up Global Options and import packages
 ```{r}
 options(conflicts.policy = "depends.ok")
 devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_ml.R?raw=true")
@@ -28,46 +32,41 @@ library(datadictionary)
 path_data <- "data"
 theme_set(theme_classic())
 options(tibble.width = Inf, dplyr.print_max=Inf)
-rerun_setting <- TRUE
+rerun_setting <- FALSE
 
 cl <- parallel::makePSOCKcluster(parallel::detectCores(logical = FALSE))
 doParallel::registerDoParallel(cl)
 ```
-
+In addition, I set up some parallel processing to help speed up computational cost of running these neural networks. 
+## Read in the Data
 ```{r}
 data_all <- read_csv(here::here(path_data, 'insurance_claims.csv'), show_col_types = FALSE) |> 
-  janitor::clean_names() |> glimpse()
-```
+  janitor::clean_names() |> glimpse() 
 
-```{r}
 skimr::skim(data_all)
 ```
+We read the data in and converted all the variables to snake case for better analysis. As well as looked at some basic summary statistics for the data. 
 
+## Exploratory Data Analysis
 ```{r}
 data_all  <- data_all |>
   mutate(across(where(is.character), ~replace(., . == "?", NA)),
          property_damage_yes = if_else(property_damage == 'NO', -.5, .5),
          police_report_available_yes = if_else(police_report_available == 'NO', -.5, .5)) |> 
-  select(-property_damage, -police_report_available)
+  select(-property_damage, -police_report_available, -'c39')
 
 glimpse(data_all)
 ```
+I had to change all the missing variables in the dataset from '?' to 'NA' which will make analyses smoother. As well as making 'property_damage' and 'police_report_available' into dummy coded variables. This will also be more useful when fitting my recipes. Then removed the original variables so that the model did not try to run those variables instead of the new ones. There was an additional variables that was called 'c39', which had completely NA values in response to it, so it can removed it. 
 
-
-```{r}
-data_all <- data_all |> 
-  select(-'c39')
-```
-
-
-## Creat a Data Dictionary
-### Find all variable names
+# Creat a Data Dictionary
+## Find all variable names
 ```{r}
 variable_names <- colnames(data_all)
 variable_names
 ```
 
-### Define the variables
+## Define the variables
 ```{r}
 variable_names <- c(
   "months_as_customer", "age", "policy_number", "policy_bind_date",
@@ -76,14 +75,13 @@ variable_names <- c(
   "insured_occupation", "insured_hobbies", "insured_relationship", "capital_gains",
   "capital_loss", "incident_date", "incident_type", "collision_type",
   "incident_severity", "authorities_contacted", "incident_state", "incident_city",
-  "incident_location", "incident_hour_of_the_day", "number_of_vehicles_involved", "property_damage",
-  "bodily_injuries", "witnesses", "police_report_available", "total_claim_amount",
+  "incident_location", "incident_hour_of_the_day", "number_of_vehicles_involved", "property_damage_yes",
+  "bodily_injuries", "witnesses", "police_report_available_yes", "total_claim_amount",
   "injury_claim", "property_claim", "vehicle_claim", "auto_make",
   "auto_model", "auto_year", "fraud_reported"
 )
 ```
-
-### Add descriptions
+## Add descriptions
 ```{r}
 variable_descriptions <- c(
   "Length of time (in months) the customer has been with the insurer",
@@ -113,10 +111,10 @@ variable_descriptions <- c(
   "Location description of the incident",
   "Hour of day the incident occurred (0–23)",
   "Number of vehicles involved in the incident",
-  "Whether there was property damage (YES/NO)",
+  "Whether there was property damage (YES, 0.5/NO, -0.5)",
   "Number of bodily injuries reported",
   "Number of witnesses to the incident",
-  "Whether a police report was available (YES/NO)",
+  "Whether a police report was available (YES, 0.5/NO, -0.5)",
   "Total dollar amount claimed for the incident",
   "Dollar amount claimed for bodily injury",
   "Dollar amount claimed for property damage",
@@ -128,7 +126,7 @@ variable_descriptions <- c(
 )
 ```
 
-### Create into a table
+## Create into a table
 ```{r}
 data_dictionary <- data.frame(
   `Variable_Name` = variable_names,
@@ -138,8 +136,9 @@ data_dictionary <- data.frame(
 
 data_dictionary
 ```
+This creates a data dictionary that we can reference when examining the variables. 
 
-## Observe Correlations
+# Observe Correlations
 ```{r}
 sub_data <- data_all |> 
   select(auto_year, auto_make, 
@@ -147,8 +146,9 @@ sub_data <- data_all |>
 
 GGally::ggpairs(sub_data)
 ```
+We can see here that there are not many strong correlations with these variables. The strongest correlation that we have is for 'injury_claim' and 'property_damage_yes', with just .05. This will be useful when trying to make interactions in our recipes. 
 
-
+# Split the data
 ```{r}
 set.seed(123456)
 splits_test <- data_all |> 
@@ -162,15 +162,33 @@ data_test <- splits_test |>
 
 split_val <- validation_split(data_trn, prop = c(3/4), strata = "fraud_reported")
 ```
+We use a stratified split to ensure balanced representation of fraudulent and non-fraudulent cases in both training and testing sets. The 2/3 proportion for training provides sufficient data for model development while reserving adequate data for final evaluation. The validation split creates a further subdivision of the training data for hyperparameter tuning and model selection, helping prevent overfitting to the test set.
 
+## Examine Distributions
 ```{r}
-data_trn |>
-  select(where(is.numeric)) |> 
-  names() |> 
-  map(\(name) plot_box_violin(df = data_trn, x = name)) |> 
-  cowplot::plot_grid(plotlist = _, ncol = 3)
-```
+key_vars <- c("auto_make", "injury_claim", "property_claim", 
+              "vehicle_claim", "bodily_injuries", "witnesses")
 
+comparison_plots <- key_vars |> 
+  map(\(var_name) {
+    data_trn |>
+      ggplot(aes(x = fraud_reported, y = !!sym(var_name), fill = fraud_reported)) +
+      geom_boxplot(alpha = 0.7) +
+      geom_jitter(width = 0.2, alpha = 0.3, size = 0.5) +
+      labs(title = str_to_title(str_replace_all(var_name, "_", " ")),
+           x = "Fraud Reported",
+           y = var_name) +
+      theme_minimal() +
+      theme(legend.position = "none") +
+      scale_fill_manual(values = c("N" = "blue", "Y" = "red"))
+  })
+
+comparison_plots
+```
+These plots help visualize the distributions of the variables and tell whether or not what certain patterns in the data persist. For example, witnesses being present may have a strong impact on fraud detection.
+
+# Build Mode 1
+## Recipe Creation
 ```{r}
 rec_1 <- recipe(fraud_reported ~ ., data = data_trn) |>
   step_rm(incident_location, insured_zip, policy_bind_date, incident_date,
@@ -192,7 +210,7 @@ feat_range_trn <- rec_1 |>
   bake(NULL)
 
 ```
-
+This recipe implements many different step functions to allow for higher accuracy scores. We are regressing fraud_reported on all of the other variables. This is to allow our dataset to be large enough to run a model with hidden layers and not overfit to the training set. In addition, we needed to use 'step_smote()' because the data was heavily imbalanced to 'No' for 'fraud_reported'. By doing this, it will make our model less likely to always predict 'No' and balance the data better. 
 
 ```{r}
 fit_seeds <- sample.int(10^5, size = 3)
@@ -222,8 +240,10 @@ fit_nnet_range <- cache_rds(
 
 fit_nnet_range$.metrics
 ```
+This model was selected with these hyperparameters, after trial and error to get the best score for the recipe created. Even still, the accuracy was only 73% and the roc was 75%. These are not that good of scores, so we can work to improve these recipes. 
 
-
+# Build Model 2
+## Recipe 2 Creation
 ```{r}
 
 rec_2 <- recipe(fraud_reported ~ ., data = data_trn) |>
@@ -244,11 +264,13 @@ feat_range_trn <- rec_2 |>
   prep(data_trn) |> 
   bake(NULL)
 ```
+This recipe follows many of the same steps as the recipe in the first model, however, it is now looking for every interaction with every numeric predictor. This will help look for a better accuracy at the cost of computation speed. With the data being as imbalanced as it is, there are only a few other steps that could help improve this models accuracy.  
 
+## Fit nnet_m2
 ```{r}
 fit_seeds <- sample.int(10^5, size = 3)
 
-fit_nnet_range <- cache_rds(
+nnet_m2 <- cache_rds(
   expr = {
     mlp(
     hidden_units = 19,
@@ -267,13 +289,13 @@ fit_nnet_range <- cache_rds(
       )
   }, 
   dir = "cache/",
-  file = "fit_nnet_range",
+  file = "nn_m2",
   rerun = rerun_setting
 )
 
-fit_nnet_range$.metrics
+nnet_m2$.metrics
 ```
-
+After running these models, we was able to increase both accuracy and roc to 77% and 78%, which are a lot better, but still not the best. This can be improved upon with a larger dataset, as having these hidden layers may increase the noise that is overfit in the training set, not the validation set. 
 
 
 
