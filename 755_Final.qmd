@@ -12,7 +12,10 @@ editor:
     wrap: 72
 ---
 # Project Overview
-This project focuses on the importance of fraud detection with automotive insurance. 
+This project focuses on the importance of fraud detection with automotive insurance. Insurance fraud is a problem that can cost companies billions of dollars. This project focuses on the scope of automated fraud detection with different factors. In order to find this relationship, we conducted a neural network to detect when fraudulent claims were coming based on certain car characteristics.
+
+# Research Question
+Can we automatically detect, with a high accuracy, a model for insurance fraud, based on the focal predictors, 'auto_year', 'auto_make' and 'witnesses' along with all of the other predictors. 
 
 # Set up 
 ## Set up Global Options and import packages
@@ -24,6 +27,7 @@ devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_plot
 devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
 library(tidyverse) 
 library(tidymodels)
+library(yardstick)
 library(xfun, include.only = "cache_rds")
 library(keras, exclude = "get_weights")
 library(magrittr, exclude = c("set_names", "extract"))
@@ -51,21 +55,20 @@ We read the data in and converted all the variables to snake case for better ana
 ```{r}
 data_all  <- data_all |>
   mutate(across(where(is.character), ~replace(., . == "?", NA)),
+         fraud_reported = factor(fraud_reported, levels=c('N','Y')),
          property_damage_yes = if_else(property_damage == 'NO', -.5, .5),
          police_report_available_yes = if_else(police_report_available == 'NO', -.5, .5)) |> 
   select(-property_damage, -police_report_available, -'c39')
 
 glimpse(data_all)
 ```
-I had to change all the missing variables in the dataset from '?' to 'NA' which will make analyses smoother. As well as making 'property_damage' and 'police_report_available' into dummy coded variables. This will also be more useful when fitting my recipes. Then removed the original variables so that the model did not try to run those variables instead of the new ones. There was an additional variables that was called 'c39', which had completely NA values in response to it, so it can removed it. 
-
+I had to change all the missing variables in the dataset from '?' to 'NA' which will make analyses smoother. As well as making 'property_damage' and 'police_report_available' into dummy coded variables. This will also be more useful when fitting my recipes. Then removed the original variables so that the model did not try to run those variables instead of the new ones. There was an additional variables that was called 'c39', which had completely NA values in response to it, so it can removed it. In addition, fraud_reported needed to be changed to a factor in order to conduct our analysis. 
 # Creat a Data Dictionary
 ## Find all variable names
 ```{r}
 variable_names <- colnames(data_all)
 variable_names
 ```
-
 ## Define the variables
 ```{r}
 variable_names <- c(
@@ -125,7 +128,6 @@ variable_descriptions <- c(
   "Whether the claim was reported as fraud (Y/N)"
 )
 ```
-
 ## Create into a table
 ```{r}
 data_dictionary <- data.frame(
@@ -142,7 +144,8 @@ This creates a data dictionary that we can reference when examining the variable
 ```{r}
 sub_data <- data_all |> 
   select(auto_year, auto_make, 
-                    property_damage_yes, bodily_injuries, injury_claim, witnesses, fraud_reported)
+         property_damage_yes, bodily_injuries, 
+         injury_claim, witnesses, fraud_reported)
 
 GGally::ggpairs(sub_data)
 ```
@@ -152,7 +155,7 @@ We can see here that there are not many strong correlations with these variables
 ```{r}
 set.seed(123456)
 splits_test <- data_all |> 
-  initial_split(prop = 2/3, strata = "fraud_reported")
+  initial_split(prop = .8, strata = "fraud_reported")
 
 data_trn <- splits_test |> 
   analysis()
@@ -162,7 +165,7 @@ data_test <- splits_test |>
 
 split_val <- validation_split(data_trn, prop = c(3/4), strata = "fraud_reported")
 ```
-We use a stratified split to ensure balanced representation of fraudulent and non-fraudulent cases in both training and testing sets. The 2/3 proportion for training provides sufficient data for model development while reserving adequate data for final evaluation. The validation split creates a further subdivision of the training data for hyperparameter tuning and model selection, helping prevent overfitting to the test set.
+We use a stratified split to ensure balanced representation of fraudulent and non-fraudulent cases in both training and testing sets. The .8 proportion for training provides sufficient data for model development while reserving adequate data for final evaluation. The validation split creates a further subdivision of the training data for hyperparameter tuning and model selection, helping prevent overfitting to the test set.
 
 ## Examine Distributions
 ```{r}
@@ -188,9 +191,10 @@ comparison_plots
 These plots help visualize the distributions of the variables and tell whether or not what certain patterns in the data persist. For example, witnesses being present may have a strong impact on fraud detection.
 
 # Build Mode 1
+
 ## Recipe Creation
 ```{r}
-rec_1 <- recipe(fraud_reported ~ ., data = data_trn) |>
+rec_1 <- recipe(fraud_reported ~ auto_year + ., data = data_trn) |>
   step_rm(incident_location, insured_zip, policy_bind_date, incident_date,
           policy_number, insured_hobbies) |>
   step_impute_mean(all_numeric_predictors()) |>
@@ -217,10 +221,7 @@ fit_seeds <- sample.int(10^5, size = 3)
 
 fit_nnet_range <- cache_rds(
   expr = {
-    mlp(
-    hidden_units = 24,
-    penalty = 0.003,
-    epochs = 100
+    mlp(epochs = 20
 )  |> 
       set_mode("classification") |> 
       set_engine("keras", callbacks = callback_early_stopping(patience = 10),
@@ -230,7 +231,7 @@ fit_nnet_range <- cache_rds(
       fit_resamples(
         preprocessor = rec_1,         
         resamples = split_val,        
-        metrics = metric_set(accuracy, roc_auc)
+        metrics = metric_set(accuracy)
       )
   }, 
   dir = "cache/",
@@ -240,13 +241,13 @@ fit_nnet_range <- cache_rds(
 
 fit_nnet_range$.metrics
 ```
-This model was selected with these hyperparameters, after trial and error to get the best score for the recipe created. Even still, the accuracy was only 73% and the roc was 75%. These are not that good of scores, so we can work to improve these recipes. 
+This model was selected with these hyperparameters, after trial and error to get the best score for the recipe created. Even still, the accuracy was only 73%. These are not that good of scores, so we can work to improve these recipes. 
 
 # Build Model 2
 ## Recipe 2 Creation
 ```{r}
 
-rec_2 <- recipe(fraud_reported ~ ., data = data_trn) |>
+rec_2 <- recipe(fraud_reported ~ auto_make + auto_year + witnesses + ., data = data_trn) |>
   step_rm(incident_location, insured_zip, policy_bind_date, incident_date,
           policy_number, insured_hobbies) |>
   step_impute_mean(all_numeric_predictors()) |>
@@ -255,8 +256,7 @@ rec_2 <- recipe(fraud_reported ~ ., data = data_trn) |>
            property_claim, vehicle_claim, capital_gains, offset = 1) |> 
   step_other(all_nominal_predictors(), threshold = 0.05, other = "other") |>
   step_dummy(all_nominal_predictors()) |>
-  step_interact(terms = ~ all_numeric_predictors():all_numeric_predictors()) |>
-  step_smote(fraud_reported) |>
+  step_smote(fraud_reported, over_ratio = 1) |>
   step_zv(all_predictors()) |>
   step_normalize(all_numeric_predictors())
 
@@ -264,38 +264,122 @@ feat_range_trn <- rec_2 |>
   prep(data_trn) |> 
   bake(NULL)
 ```
-This recipe follows many of the same steps as the recipe in the first model, however, it is now looking for every interaction with every numeric predictor. This will help look for a better accuracy at the cost of computation speed. With the data being as imbalanced as it is, there are only a few other steps that could help improve this models accuracy.  
+This recipe follows many of the same steps as the recipe in the first model, however, it is now not looking at any interactions. This model is a simplier model, which may yield a better result. Sometimes, more complicated models are not the better ones.  
 
 ## Fit nnet_m2
+## K Fold validation and Grid Set Up
+```{r}
+set.seed(123233)
+folds <- vfold_cv(data_trn, v = 5)
+
+nn_grid <- grid_regular(
+  hidden_units(range = c(1, 10)),
+  penalty(range = c(-4, -1)), 
+  levels = 4                 
+)
+```
+When creating the validation of 5 v folds, this will allow our data to have a more accurate result. When folding the data 5 times, it looks for noise in other folds, not just the training set. We also created a grid in order to tune to the most optimal hyperparameters. This will save time and allow us to look for the best hyperparameters and give us the best results with these tuned hyperparameters.
 ```{r}
 fit_seeds <- sample.int(10^5, size = 3)
 
 nnet_m2 <- cache_rds(
   expr = {
-    mlp(
-    hidden_units = 19,
-    penalty = 0.0054,
-    epochs = 61
-)  |> 
+    nnet_m2_spec <- mlp(
+      hidden_units = tune(),
+      penalty = tune(),
+      epochs = 100
+    ) |> 
       set_mode("classification") |> 
-      set_engine("keras", callbacks = callback_early_stopping(patience = 10),
+      set_engine("keras", verbose = 0,
                  seeds = fit_seeds, 
                  metrics = c("accuracy", "AUC"),
-                 validation_split = 0.1) |> 
-      fit_resamples(
-        preprocessor = rec_2,         
-        resamples = split_val,        
-        metrics = metric_set(accuracy, roc_auc)
-      )
+                 validation_split = 0.1)
+    
+    tune_grid(
+      object = nnet_m2_spec,
+      preprocessor = rec_2,
+      resamples = split_val,
+      grid = nn_grid,
+      metrics = metric_set(accuracy)
+    )
   }, 
   dir = "cache/",
   file = "nn_m2",
   rerun = rerun_setting
 )
-
-nnet_m2$.metrics
+show_best(nnet_m2)
 ```
-After running these models, we was able to increase both accuracy and roc to 77% and 78%, which are a lot better, but still not the best. This can be improved upon with a larger dataset, as having these hidden layers may increase the noise that is overfit in the training set, not the validation set. 
+After running these models, we was able to increase both accuracy 81% which is a lot better, but still not the best. This can be improved upon with a larger dataset, as having these hidden layers may increase the noise that is overfit in the training set, not the validation set. 
+## Find the best hyperparameters
+```{r}
+best_params <- show_best(nnet_m2, metric = "accuracy", n = 1) |> 
+  select(hidden_units, penalty)
 
+print(best_params)
+```
+We can see that 4 hidden_units or hidden layers are the most optimal as well as a penalty of .001. This will be useful in our next step, when creating a best model to test the out of sample data.
+
+# Create best model
+```{r}
+final_model_spec <- mlp(
+  hidden_units = 10,
+  penalty = 0.1,
+  epochs = 64
+) |> 
+  set_mode("classification") |> 
+  set_engine(
+    "keras",
+    callbacks = callback_early_stopping(patience = 10),
+    verbose = 0
+  )
+
+prepped_rec <- prep(rec_2, training = data_trn)
+
+x_train <- bake(prepped_rec, new_data = NULL) |> select(-fraud_reported)
+y_train <- data_trn$fraud_reported |> factor(levels = c("N", "Y"))
+
+prepped_rec <- prep(rec_2, training = data_trn)
+
+train_baked <- bake(prepped_rec, new_data = data_trn)
+
+x_train <- train_baked |> select(-fraud_reported)
+y_train <- data_trn$fraud_reported |> factor(levels = c("N", "Y"))
+
+final_model_spec <- mlp(
+  hidden_units = 4,
+  penalty = 0.001,
+  epochs = 64
+) |> 
+  set_mode("classification") |> 
+  set_engine(
+    "keras",
+    callbacks = callback_early_stopping(patience = 10),
+    verbose = 0
+  )
+
+final_fit <- fit_xy(final_model_spec, x = x_train, y = y_train)
+
+test_baked <- bake(prepped_rec, new_data = data_test)
+
+x_test <- test_baked |> select(-fraud_reported)
+y_test <- data_test$fraud_reported |> factor(levels = c("N", "Y"))
+
+test_pred_class <- predict(final_fit, x_test)
+
+test_predictions <- bind_cols(
+  test_pred_class,
+  fraud_reported = y_test
+)
+
+
+test_accuracy <- accuracy(test_predictions, truth = fraud_reported, estimate = .pred_class)
+
+print("Final Test Accuracy:")
+print(test_accuracy)
+
+```
+We created a model with the most optimal hyperparameters and tested it with the test data set in order to see how it performed outside the training set data. We found that our model performed with a 82% accuracy metric.
+
+An accuracy of 79% means that when applied to new, unseen claims data, the model correctly identifies whether a claim is fraudulent or not about 79 times out of 100. Given the imbalanced nature of the data that is a pretty decent result. However, it is important for the future to look for different performance metrics, which can tell us a more accurate interpretation of our result. 
 
 
