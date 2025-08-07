@@ -1,8 +1,14 @@
 # PSYCH 755 Final Project
 
+## Authors
+
+David Jolly, Lauren Khoury, Jake Murray
+
 ## Overview
 
-For our final project, we practice looking at insurance data in preparation for our Capstone project. 
+For our final project, we practiced looking at insurance data in preparation for our Capstone project. 
+We built a SQL database containing multiple sources of insurance data that we found.
+We fit a neural network to predict insurance fraud (more details in the notebook).
 
 Our final project uses:
 
@@ -22,7 +28,11 @@ Our final project uses:
     
 3. 'build-insurance.py' : Python script for building SQL database
 
-4. '755_final.qmd' : R/quarto notebook with our data analysis & neural network model fitting
+4. 'insurance.db' : the SQL database
+
+5. '755_Final.qmd' : R/quarto notebook with our data analysis & neural network model fitting
+
+6. '755_Final.html' : the rendered QMD 
 
 ## Using this Repo
 
@@ -83,17 +93,22 @@ sqlite3 insurance.db
 
 ### Fitting a Neural Network
 
-This notebook will use R to fit a neural network to predict insurance fraud.
+This markdown notebook will use R to fit a neural network to predict insurance fraud. 
+The notebook also conducts preliminary exploratory data analysis.
 
-It requires installation of these R packages:
+To run/render this notebook, installation of these R packages is required:
 
 - tidyverse
 - tidymodels
 - xfun
 - keras
 - magrittr
+- themis
+- datadictionary
 
 It also sources functions from our machine learning professor's github.
+
+View the rendered HTML to see the code, output, and text for each step of the coding process.
 
 
 
