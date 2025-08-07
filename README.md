@@ -6,14 +6,15 @@ David Jolly, Lauren Khoury, Jake Murray
 
 ## Overview
 
-For our final project, we practiced looking at insurance data in preparation for our Capstone project. 
+For our final project, we familiarized ourselves with looking at insurance data in preparation for our Capstone project. 
 We built a SQL database containing multiple sources of insurance data that we found.
-We fit a neural network to predict insurance fraud (more details in the notebook).
+With our main dataset, we fit a neural network to predict insurance fraud based on certain predictors.
+Please view the rendered HTML file to see more about the project overview, research question, steps to answer the research question, and evaluation of our results. 
 
 Our final project uses:
 
 - Quarto
-- Python & Jupyter notebooks
+- Python
 - R & RStudio
 - SQL
 - Neural Networks
@@ -106,9 +107,10 @@ To run/render this notebook, installation of these R packages is required:
 - themis
 - datadictionary
 
-It also sources functions from our machine learning professor's github.
+It also sources functions from our machine learning professor's GitHub.
 
-View the rendered HTML to see the code, output, and text for each step of the coding process.
+View the rendered HTML to see the code, output, and text for each step of the coding process. 
+Or render the QMD for yourself!
 
 
 
